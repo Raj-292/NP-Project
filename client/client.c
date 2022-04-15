@@ -144,7 +144,7 @@ void writeToSocket(int client_socket) {
         }
     }
     // Close Connection
-    close(client_socket);
+    // close(client_socket);
 }
 
 int handleErrors(int exp, const char* msg) {
