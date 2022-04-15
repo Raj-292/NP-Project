@@ -7,6 +7,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <sys/stat.h>
+
 #define BUFFSIZE 100
 #define ERROR_RETURN_VALUE (-1)
 #define REFUSAL_MESSAGE "Connection Refused, maximum number of concurrent clients reached, Exiting\n"
@@ -136,6 +138,20 @@ void writeToSocket(int client_socket) {
 
                 // Display success message and close File
                 printf("CLIENT: File received from server! \n");
+
+                char permissionsBuffer[MAX];
+                struct stat st;
+
+                handleErrors(recv(client_socket, permissionsBuffer, sizeof(permissionsBuffer), 0), "Error while receiving file permissions\n");
+
+                memcpy(&st, permissionsBuffer, sizeof(permissionsBuffer));
+                // Set permissions
+                if (chmod(fileName, st.st_mode) == -1) {
+                    printf("Error while setting permissions\n");
+                } else {
+                    printf("Set permissions successfully\n");
+                }
+
                 fclose(clientFile);
             }
         } else {

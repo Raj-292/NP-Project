@@ -13,6 +13,8 @@
 
 #include <errno.h>
 
+#include <sys/stat.h>
+
 #define BUFFSIZE 100
 #define ERROR_RETURN_VALUE (-1)
 #define SERVER_BACKLOG 1
@@ -64,15 +66,9 @@ int main(int argc, char** argv) {
     int selected_interface_number;
     scanf("%d", &selected_interface_number);
 
-    int validInterfaceSelected = 0;
-
-    // printf("is digit : %d\n", isdigit(selected_interface_number));
-    // printf("second cond : %d\n", selected_interface_number > 0 && selected_interface_number <= interfaces_count);
-
     char ipString[15];
 
     if (isdigit(selected_interface_number) == 0 && (selected_interface_number > 0 && selected_interface_number <= interfaces_count)) {
-        // validInterfaceSelected = 1;
         getifaddrs(&ifap);
         int current_count = 0;
         for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
@@ -200,6 +196,10 @@ void* handle_connection(void* p_client_socket) {
             // Inform client that file is on server via OK message
             write(client_socket, "OK\0", sizeof("OK\0"));
 
+            /* Reading file permissions */
+            struct stat st;
+            stat(fileName, &st);
+
             // Reset messageBuffer, wait for client to acknowledge the OK message
             bzero(messageBuffer, sizeof(messageBuffer));
             read(client_socket, messageBuffer, sizeof(messageBuffer));
@@ -223,6 +223,11 @@ void* handle_connection(void* p_client_socket) {
                     bzero(messageBuffer, MAX);
                 }
                 printf("SERVER: File successfully sent to client [tid : %ld] \n", tid);
+
+                /* send permissions */
+                char permissionsBuffer[MAX];
+                memcpy(permissionsBuffer, &st, sizeof(st));
+                handleErrors(send(client_socket, permissionsBuffer, sizeof(permissionsBuffer), 0), "Error while sending permissions\n");
             }
         } else {
             // Else if file not on server -- print error, send NULL back to client. Wait for next filename from client.
@@ -230,77 +235,6 @@ void* handle_connection(void* p_client_socket) {
             write(client_socket, "NULL\0", sizeof("NULL\0"));
         }
     }
-
-    /*
-    while ((bytes_read = recv(client_socket, buffer, BUFFSIZE - 1, flags)) != 0) {
-        if (bytes_read < 0) {
-            perror("[x] recv failed\n");
-            exit(EXIT_FAILURE);
-        }
-
-        if ((strcmp(buffer, "")) != 0) {
-            if (strcmp(buffer, "\0") == 0) {
-                printf("ye hai zero wala \n");
-            }
-
-            if (strcmp(buffer, "\n") == 0) {
-                printf("ye hai newline wala \n");
-                continue;
-            }
-
-            printf("[tid : %ld] --->  %s\n", tid, buffer);
-            char fileName[100];
-            memset(&fileName, 0, 100);
-            strcpy(fileName, buffer);
-            // memcpy(fileName, buffer, strlen(buffer));
-            // strncpy(fileName, buffer, strlen(buffer));
-
-            int len = strlen(fileName);
-            printf("Len : %d\n", len);
-
-            fileName[strlen(fileName) - 1] = '\0';
-
-            if (strcmp(fileName, "") != 0) {
-                printf("The client requested for file : %s\n", fileName);
-                FILE* filePointer;
-
-                if ((filePointer = fopen(fileName, "r")) != NULL) {
-                    printf("File exists!\n");
-                } else {
-                    // perror("File DNE!\n");
-                    fprintf(stderr, "can't open %s: %s\n", fileName, strerror(errno));
-                }
-
-                while (true) {
-                    unsigned char buff[1024] = {0};
-                    printf("Created buff\n");
-                    int nread = fread(buff, 1, 1024, filePointer);
-                    printf("nread : %d\n", nread);
-
-                    if (nread > 0) {
-                        write(client_socket, buff, nread);
-                        printf("nread was greater than zero so wrote\n");
-                    }
-
-                    if (nread < 1024) {
-                        printf("nread was smaller than 1024\n");
-                        if (feof(filePointer)) {
-                            printf("End of file\n");
-                            printf("File transfer completed!");
-                        }
-
-                        if (ferror(filePointer))
-                            printf("Error Reading!\n");
-                        break;
-                    }
-                }
-            }
-        }
-
-        memset(&buffer, 0, bytes_read);
-    }
-
-    */
 
     current_connected_clients--; /* Decrement current connected clients */
     close(*((int*)p_client_socket));
