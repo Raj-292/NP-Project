@@ -9,13 +9,11 @@
 
 #include <sys/stat.h>
 
-#define BUFFSIZE 100
+#define MAX 512
 #define ERROR_RETURN_VALUE (-1)
 #define REFUSAL_MESSAGE "Connection Refused, maximum number of concurrent clients reached, Exiting\n"
 
-#define MAX 512
-
-void writeToSocket(int client_socket);
+void file_retrieve_attempt(int client_socket);
 int handleErrors(int exp, const char* msg);
 
 int main() {
@@ -30,13 +28,13 @@ int main() {
     svrAddr.sin_family = AF_INET;
 
     /* Accept Server IP and convert to IPv4 dotted decimal */
-    char ipString[15];  // IP in String format
+    char ipString[15]; /* IP in String format */
     printf("Enter Server IP Address : ");
     scanf("%s", ipString);
     svrAddr.sin_addr.s_addr = inet_addr(ipString);
 
     /* Accept Server Port no and convert to network byte order */
-    int portInt;  // Port Number (Integer)
+    int portInt; /* Port Number (Integer) */
     printf("Enter Server Port number : ");
     scanf("%d", &portInt);
     getchar(); /* Consume the stray newline character */
@@ -56,111 +54,111 @@ int main() {
     } else
         printf("Connected to the server ... \n");
 
-    writeToSocket(client_socket);
+    file_retrieve_attempt(client_socket);
 
+    /* Close socket at this point */
     handleErrors(close(client_socket), "Error while closing socket.\n");
 
     return 0;
 }
 
-void writeToSocket(int client_socket) {
+void file_retrieve_attempt(int client_socket) {
     char messageBuffer[MAX];
     char fileName[MAX];
 
-    // Infinite loop for communication between client and server
-    while (1) {
-        // Reset messageBuffer
-        bzero(messageBuffer, sizeof(messageBuffer));
+    /* Infinite loop for Client <-> Server communication */
+    while (true) {
+        /* Set messageBuffer to contain 0s */
+        memset(&messageBuffer, 0, sizeof(messageBuffer));
 
-        // Get user input for file name, send input to server
+        /* Get user input for file name, send that to server */
         printf("Enter a filename to retrieved, or type 'quit' to close connection: ");
         scanf("%s", messageBuffer);
-        memcpy(fileName, messageBuffer, sizeof(messageBuffer));      // Keep local copy of (potential) filename
-        write(client_socket, messageBuffer, sizeof(messageBuffer));  // Write message to server
+        memcpy(fileName, messageBuffer, sizeof(messageBuffer));
+        write(client_socket, messageBuffer, sizeof(messageBuffer)); /* Write the fileName to the server buffer */
 
-        // If message sent is "exit" wait for server to respond with exit message.
+        /* If message sent is "quit" */
         if ((strncmp(messageBuffer, "quit", 4)) == 0) {
-            // Reset messageBuffer, read returned exit message from server
-            bzero(messageBuffer, sizeof(messageBuffer));
-            read(client_socket, messageBuffer, sizeof(messageBuffer));  // Read message returned from server
+            /* Reset messageBuffer, read returned quit message from server */
+            memset(&messageBuffer, 0, sizeof(messageBuffer));
+            read(client_socket, messageBuffer, sizeof(messageBuffer)); /* Read response that server returned */
 
-            // If server message is "exit", close connection
+            /* If server responds with "quit", close the connection */
             if ((strncmp(messageBuffer, "quit", 4)) == 0) {
                 printf("SERVER: Closing connection. \n");
-                printf("CLIENT: Exiting...\n");
+                printf("Exiting...\n");
                 break;
             } else {
-                printf("CLIENT: ERROR Server did not acknowledge exit. Force closing connection... \n");
+                printf("ERROR : NO ack from Server. Closing connection without ack... \n");
                 exit(0);
             }
         }
 
-        // Reset messageBuffer, wait for OK message to confirm file existance.
-        bzero(messageBuffer, sizeof(messageBuffer));
-        read(client_socket, messageBuffer, sizeof(messageBuffer));  // Read message returned from server
+        /* Reset messageBuffer, wait for OK (if file exists on server) */
+        memset(&messageBuffer, 0, sizeof(messageBuffer));
 
-        // If server finds file and sends OK message, send an OK back and start receiving the file
+        read(client_socket, messageBuffer, sizeof(messageBuffer)); /* Read message returned from server */
+
+        /* If file exists on server and server acknowledges with OK message, send an OK back and start receiving the file */
         if ((strncmp(messageBuffer, "OK", 2)) == 0) {
-            // Send ok message back to client
+            /* Write OK to the buffer */
             write(client_socket, messageBuffer, sizeof(messageBuffer));
 
-            // Receive File from Server
-            printf("CLIENT: Receiveing %s from Server and saving it. \n", fileName);
+            printf("Receiveing %s from Server and saving it ... \n", fileName);
 
-            // Create file in write mode
-            FILE* clientFile = fopen(fileName, "w");
+            /* Create a new file and open in write mode */
+            FILE* newFile = fopen(fileName, "w");
 
-            // If the file is null something went wrong, else download file from server
-            if (clientFile == NULL) {
-                printf("CLIENT: ERROR File %s cannot be opened. \n", fileName);
+            /* If the file is NULL show error*/
+            if (newFile == NULL) {
+                printf("ERROR : File %s cannot be opened. \n", fileName);
             } else {
-                // Reset Buffer, init block size
-                bzero(messageBuffer, MAX);
+                /* Reset Buffer, re-initialize block size */
+                memset(&messageBuffer, 0, MAX);
                 int blockSize = 0;
 
-                // While still receiving (downloading) the file
+                /* While server keeps sending */
                 while ((blockSize = recv(client_socket, messageBuffer, MAX, 0)) > 0) {
-                    int fileWrite = fwrite(messageBuffer, sizeof(char), blockSize, clientFile);
+                    int fileWrite = fwrite(messageBuffer, sizeof(char), blockSize, newFile);
 
-                    // If the fileWrite size is less than the block size
+                    /* If the fileWrite size is less than the block size */
                     if (fileWrite < blockSize) {
-                        printf("CLIENT: ERROR File write failed.\n");
+                        printf("ERROR : File write failed.\n");
                     }
 
-                    // Reset buffer
-                    bzero(messageBuffer, MAX);
+                    /* Reset buffer */
+                    memset(&messageBuffer, 0, MAX);
 
-                    // Break out of loop if last block.
+                    /* If last block, break */
                     if (blockSize == 0 || blockSize != 512) {
                         break;
                     }
                 }
 
-                // Display success message and close File
-                printf("CLIENT: File received from server! \n");
-
+                /* Receive permissions from server and set the permissions on created file */
                 char permissionsBuffer[MAX];
                 struct stat st;
 
                 handleErrors(recv(client_socket, permissionsBuffer, sizeof(permissionsBuffer), 0), "Error while receiving file permissions\n");
 
                 memcpy(&st, permissionsBuffer, sizeof(permissionsBuffer));
-                // Set permissions
+                /* Set permissions received from server */
                 if (chmod(fileName, st.st_mode) == -1) {
                     printf("Error while setting permissions\n");
                 } else {
                     printf("Set permissions successfully\n");
                 }
 
-                fclose(clientFile);
+                /* Display receipt message and close File */
+                printf("File received from server! \n");
+
+                fclose(newFile);
             }
         } else {
-            // Else if no OK is received file is not on server.
+            /* No OK received hence file does not exist on server */
             printf("SERVER: File %s not found on server, please try another file. \n", fileName);
         }
     }
-    // Close Connection
-    // close(client_socket);
 }
 
 int handleErrors(int exp, const char* msg) {
